@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 09, 2025 at 05:23 PM
+-- Generation Time: May 10, 2025 at 07:47 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -602,18 +602,20 @@ CREATE TABLE `users` (
   `username` varchar(80) NOT NULL,
   `password` varchar(255) NOT NULL,
   `role` enum('user','admin') NOT NULL DEFAULT 'user',
-  `email` varchar(255) DEFAULT NULL
+  `email` text NOT NULL,
+  `is_verified` tinyint(1) DEFAULT 0,
+  `verification_code` text DEFAULT NULL,
+  `code_expires` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `users`
 --
 
-INSERT INTO `users` (`id`, `username`, `password`, `role`, `email`) VALUES
-(8, 'admin', 'scrypt:32768:8:1$HD13SiK3xNEOgB4Q$8f9cef7b04f8979711202ec3baea8502975507eaaf11802866887837f1e76da75ad024a16e185349c66343fd922b3a7103322dd59a813c3933c583d5d7e176b7', 'admin', NULL),
-(9, 'test123', 'scrypt:32768:8:1$HfY8VnN3kECdDeHZ$0a36ecbcfbcae5f10e6bf604f4b3983cf5a73e0662a381ea8b5e23805f13ca693f59d4ced55dc62309338a4898e44576d90b353ff1773c579dece79595a9d827', 'user', NULL),
-(10, 'User1', 'scrypt:32768:8:1$TT9ipmLzZYscdady$3c8d39bb191b6f8ea577c46349db6c359e6dd3703e3ffcc67313aa7598308760f05241937c4ac3d12e2bbee92dbde1965b635f5b4bbfadd4218dc5fbbac1467b', 'user', NULL),
-(11, 'User2', 'scrypt:32768:8:1$5dAeCvFY0HfKxLX3$2884c2beb779c2374e74703668a3d3a572bfddbdd2e3ca4ffc580bfc7fa2ccfbaa9d2e3418ad9a46680586297617fc5c8e48fe80321bccbc2b1e2d72e8ce8b72', 'user', NULL);
+INSERT INTO `users` (`id`, `username`, `password`, `role`, `email`, `is_verified`, `verification_code`, `code_expires`) VALUES
+(8, 'admin', 'scrypt:32768:8:1$HD13SiK3xNEOgB4Q$8f9cef7b04f8979711202ec3baea8502975507eaaf11802866887837f1e76da75ad024a16e185349c66343fd922b3a7103322dd59a813c3933c583d5d7e176b7', 'admin', '', 0, NULL, NULL),
+(9, 'test123', 'scrypt:32768:8:1$HfY8VnN3kECdDeHZ$0a36ecbcfbcae5f10e6bf604f4b3983cf5a73e0662a381ea8b5e23805f13ca693f59d4ced55dc62309338a4898e44576d90b353ff1773c579dece79595a9d827', 'user', '', 0, NULL, NULL),
+(16, 'user123', 'scrypt:32768:8:1$44Ess0otkqMzEzp7$fed652a159519c43e61cb72cd03cdf2219554e7dd4065ac3caa9227e8d543335a322e842a3e19f5fbc1d4f0605dbe2b7931bb266e6afa39554c7900c2c589a24', 'user', 'ryanchristian.robles@cvsu.edu.ph', 1, NULL, NULL);
 
 --
 -- Indexes for dumped tables
@@ -701,7 +703,7 @@ ALTER TABLE `thesis_versions`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
 
 --
 -- Constraints for dumped tables
