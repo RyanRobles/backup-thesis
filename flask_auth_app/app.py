@@ -4,13 +4,23 @@ import MySQLdb.cursors
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash 
 from werkzeug.utils import secure_filename
-import pytesseract
 from PIL import Image
 import spacy
 import os
 import PyPDF2
-from datetime import datetime
+from datetime import datetime, timedelta
 import shutil
+from email_utils import send_verification_email 
+from email_utils import generate_code, send_verification_email
+import smtplib
+from email.mime.text import MIMEText
+import random
+import string
+import smtplib
+from email.mime.text import MIMEText
+import os
+from markupsafe import Markup
+
 from ocr_ner_utils import (
     extract_text_from_pdf,
     extract_text_from_image,
@@ -19,12 +29,18 @@ from ocr_ner_utils import (
 
 app = Flask(__name__, template_folder='templates')
 app.secret_key = 'your_secret_key'
-
 # MySQL Configuration
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'  
 app.config['MYSQL_PASSWORD'] = ''  
 app.config['MYSQL_DB'] = 'flask_auth'
+
+# Gmail SMTP Configuration
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True  # For security (TLS encryption)
+app.config['MAIL_USERNAME'] = 'compscithesis@gmail.com'  
+app.config['MAIL_PASSWORD'] = 'yrrl idjh teci uamk'  
 
 # Configure upload folder
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -115,52 +131,62 @@ def search():
 def signup():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip()
         password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
 
-        if not username:
-            flash('Username is required', 'error')
+        # Basic validations
+        if not username or not email or not password or not confirm_password:
+            flash('All fields are required.', 'error')
             return redirect(url_for('signup'))
-        
-        if not password:
-            flash('Password is required', 'error')
-            return redirect(url_for('signup'))
-            
+
         if len(username) < 4:
-            flash('Username must be at least 4 characters', 'error')
+            flash('Username must be at least 4 characters.', 'error')
             return redirect(url_for('signup'))
-            
+
         if len(password) < 6:
-            flash('Password must be at least 6 characters', 'error')
+            flash('Password must be at least 6 characters.', 'error')
+            return redirect(url_for('signup'))
+
+        if password != confirm_password:
+            flash('Passwords do not match.', 'error')
             return redirect(url_for('signup'))
 
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        
+
         try:
-            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+            # Check if username or email already exists
+            cursor.execute("SELECT * FROM users WHERE username = %s OR email = %s", (username, email))
             if cursor.fetchone():
-                flash('Username already taken. Please choose another.', 'error')
+                flash('Username or email already exists.', 'error')
                 return redirect(url_for('signup'))
 
             hashed_password = generate_password_hash(password)
+            verification_code = ''.join(random.choices(string.digits, k=6))
+            code_expires = datetime.now() + timedelta(minutes=10)  # Code expires in 10 minutes
+
+            # Insert user into database (always unverified initially)
             cursor.execute(
-                "INSERT INTO users (username, password, role) VALUES (%s, %s, 'user')",
-                (username, hashed_password)
+                "INSERT INTO users (username, email, password, is_verified, verification_code, code_expires, role) VALUES (%s, %s, %s, %s, %s, %s, 'user')",
+                (username, email, hashed_password, 0, verification_code, code_expires)
             )
             mysql.connection.commit()
-            
-            flash('Account created successfully! Please login.', 'success')
-            return redirect(url_for('login'))
-            
+    
+            send_verification_email(email, verification_code)
+            session['pending_verification'] = username
+            flash('Verification code sent to your email. Please verify.', 'info')
+            return redirect(url_for('verify_email')) 
+
         except Exception as e:
             mysql.connection.rollback()
             flash('An error occurred during registration. Please try again.', 'error')
             return redirect(url_for('signup'))
-    
+
     return render_template('signup.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    next_url = request.args.get('next')  # Save any ?next= parameter from the login redirect
+    next_url = request.args.get('next')
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -173,25 +199,26 @@ def login():
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         try:
             cursor.execute("""
-                SELECT id, username, password, LOWER(TRIM(role)) as role 
+                SELECT id, username, password, LOWER(TRIM(role)) as role, is_verified
                 FROM users 
                 WHERE username = %s
             """, (username,))
             user = cursor.fetchone()
 
             if user and check_password_hash(user['password'], password):
+                if not user['is_verified']:
+                    flash('Please verify your email before logging in.', 'danger')
+                    session['pending_verification'] = username
+                    return redirect(url_for('verify_email'))
+                
                 user_obj = User(
                     id=user['id'],
                     username=user['username'],
                     role=user['role']
                 )
                 
-                print(f"LOGIN SUCCESS: {user_obj.username} as {user_obj.role}")
-                
                 login_user(user_obj)
                 flash('Login successful', 'success')
-
-                # Redirect to next if available, otherwise to role verifier
                 return redirect(next_url or url_for('verify_role'))
 
             flash('Invalid credentials', 'danger')
@@ -203,7 +230,6 @@ def login():
             cursor.close()
 
     return render_template('login.html', next=next_url)
-
 
 @app.route('/verify-role')
 @login_required
@@ -1205,6 +1231,70 @@ def admin_action_history():
         total=total,
         total_pages=total_pages  # ✅ Pass it here!
     )
+@app.route('/verify-email', methods=['GET', 'POST'])
+def verify_email():
+    if 'pending_verification' not in session:
+        flash('No verification pending', 'error')
+        return redirect(url_for('signup'))
+
+    username = session['pending_verification']
+    
+    if request.method == 'POST':
+        if 'resend' in request.form:
+            # Resend code logic
+            cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cursor.execute(
+                "SELECT email FROM users WHERE username = %s", 
+                (username,)
+            )
+            user = cursor.fetchone()
+            
+            if user:
+                new_code = ''.join(random.choices(string.digits, k=6))
+                new_expires = datetime.now() + timedelta(minutes=10)
+                
+                cursor.execute(
+                    "UPDATE users SET verification_code = %s, code_expires = %s WHERE username = %s",
+                    (new_code, new_expires, username)
+                )
+                mysql.connection.commit()
+                
+                send_verification_email(user['email'], new_code)
+                flash('New verification code sent!', 'success')
+            return redirect(url_for('verify_email'))
+        
+        # Normal verification attempt
+        code_entered = request.form.get('code')
+        
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute(
+            "SELECT verification_code, code_expires FROM users WHERE username = %s", 
+            (username,)
+        )
+        user = cursor.fetchone()
+        
+        if not user or not user['verification_code']:
+            flash('No verification code found. Please request a new one.', 'error')
+            return redirect(url_for('verify_email'))
+        
+        if datetime.now() > user['code_expires']:
+            flash('Verification code has expired. Please request a new one.', 'error')
+            return redirect(url_for('verify_email'))
+        
+        if user['verification_code'] == code_entered:
+            cursor.execute(
+                "UPDATE users SET is_verified = 1, verification_code = NULL, code_expires = NULL "
+                "WHERE username = %s",
+                (username,)
+            )
+            mysql.connection.commit()
+            session.pop('pending_verification')
+            flash('Email verified! You can now login.', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash('Invalid code. Please try again.', 'error')
+
+    return render_template('verify_email.html')
 
 @app.template_filter('highlight')
 def highlight_filter(s, search_query):
