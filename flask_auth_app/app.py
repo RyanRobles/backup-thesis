@@ -468,6 +468,16 @@ def process_image_search():
 @login_required
 def view_thesis(thesis_id):
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    # Record view history
+    cursor.execute("""
+        INSERT INTO user_view_history (user_id, thesis_id)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE viewed_at = CURRENT_TIMESTAMP
+    """, (current_user.id, thesis_id))
+    mysql.connection.commit()
+    
+    # Get thesis details
     cursor.execute("""
         SELECT pt.*, u.username as publisher_username
         FROM published_theses pt
@@ -478,6 +488,13 @@ def view_thesis(thesis_id):
     
     if not thesis:
         abort(404)
+    
+    # Check if bookmarked
+    cursor.execute("""
+        SELECT id FROM user_bookmarks
+        WHERE user_id = %s AND thesis_id = %s
+    """, (current_user.id, thesis_id))
+    is_bookmarked = cursor.fetchone() is not None
     
     # Get introduction pages only (first 5 pages)
     cursor.execute("""
@@ -510,13 +527,16 @@ def view_thesis(thesis_id):
                              thesis=thesis,
                              intro_pages=intro_pages,
                              matching_pages=matching_pages,
-                             search_query=search_query)
+                             search_query=search_query,
+                             is_bookmarked=is_bookmarked)
     else:
         return render_template('user_thesis_detail.html', 
                              thesis=thesis,
                              intro_pages=intro_pages,
                              matching_pages=matching_pages,
-                             search_query=search_query)
+                             search_query=search_query,
+                             is_bookmarked=is_bookmarked)
+    
 @app.route('/thesis-file/<int:thesis_id>')
 @login_required
 def serve_thesis_file(thesis_id):
@@ -1309,6 +1329,246 @@ def highlight_filter(s, search_query):
             highlighted = highlighted.replace(query.title(), f'<span class="bg-warning">{query.title()}</span>')
     
     return Markup(highlighted)
+
+@app.route('/profile-settings', methods=['GET', 'POST'])
+@login_required
+def profile_settings():
+    if request.method == 'POST':
+        new_username = request.form.get('username', '').strip()
+        current_password = request.form.get('current_password', '').strip()
+        new_password = request.form.get('new_password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        
+        try:
+            # Verify current password if making any changes
+            if new_username != current_user.username or new_password:
+                cursor.execute("SELECT password FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                
+                if not user or not check_password_hash(user['password'], current_password):
+                    flash('Current password is incorrect', 'danger')
+                    return redirect(url_for('profile_settings'))
+
+            # Validate username
+            if new_username != current_user.username:
+                if len(new_username) < 4:
+                    flash('Username must be at least 4 characters', 'danger')
+                    return redirect(url_for('profile_settings'))
+                
+                # Check if username is already taken
+                cursor.execute("SELECT id FROM users WHERE username = %s AND id != %s", 
+                             (new_username, current_user.id))
+                if cursor.fetchone():
+                    flash('Username already taken', 'danger')
+                    return redirect(url_for('profile_settings'))
+
+            # Validate password if changing
+            if new_password:
+                if len(new_password) < 6:
+                    flash('Password must be at least 6 characters', 'danger')
+                    return redirect(url_for('profile_settings'))
+                
+                if new_password != confirm_password:
+                    flash('New passwords do not match', 'danger')
+                    return redirect(url_for('profile_settings'))
+
+                hashed_password = generate_password_hash(new_password)
+            
+            # Update database
+            update_query = "UPDATE users SET username = %s"
+            params = [new_username]
+            
+            if new_password:
+                update_query += ", password = %s"
+                params.append(hashed_password)
+            
+            update_query += " WHERE id = %s"
+            params.append(current_user.id)
+            
+            cursor.execute(update_query, tuple(params))
+            mysql.connection.commit()
+            
+            # Update Flask-Login's current_user if username changed
+            if new_username != current_user.username:
+                current_user.username = new_username
+            
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('profile_settings'))
+            
+        except Exception as e:
+            mysql.connection.rollback()
+            flash(f'Error updating profile: {str(e)}', 'danger')
+            return redirect(url_for('profile_settings'))
+        finally:
+            cursor.close()
+
+    return render_template('profile_settings.html')
+
+# Bookmark routes
+@app.route('/bookmark/<int:thesis_id>', methods=['POST'])
+@login_required
+def bookmark_thesis(thesis_id):
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    try:
+        # Check if thesis exists
+        cursor.execute("SELECT id FROM published_theses WHERE id = %s", (thesis_id,))
+        if not cursor.fetchone():
+            abort(404)
+            
+        # Check if already bookmarked
+        cursor.execute("""
+            SELECT id FROM user_bookmarks 
+            WHERE user_id = %s AND thesis_id = %s
+        """, (current_user.id, thesis_id))
+        
+        if cursor.fetchone():
+            # Remove bookmark
+            cursor.execute("""
+                DELETE FROM user_bookmarks 
+                WHERE user_id = %s AND thesis_id = %s
+            """, (current_user.id, thesis_id))
+            action = 'removed'
+        else:
+            # Add bookmark
+            cursor.execute("""
+                INSERT INTO user_bookmarks (user_id, thesis_id)
+                VALUES (%s, %s)
+            """, (current_user.id, thesis_id))
+            action = 'added'
+            
+        mysql.connection.commit()
+        return jsonify({'success': True, 'action': action})
+        
+    except Exception as e:
+        mysql.connection.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        cursor.close()
+
+@app.route('/bookmarks')
+@login_required
+def view_bookmarks():
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    # Get bookmarked theses with pagination
+    cursor.execute("""
+        SELECT pt.* 
+        FROM published_theses pt
+        JOIN user_bookmarks ub ON pt.id = ub.thesis_id
+        WHERE ub.user_id = %s
+        ORDER BY ub.created_at DESC
+        LIMIT %s OFFSET %s
+    """, (current_user.id, per_page, (page-1)*per_page))
+    bookmarks = cursor.fetchall()
+    
+    # Get total count
+    cursor.execute("""
+        SELECT COUNT(*) as total 
+        FROM user_bookmarks 
+        WHERE user_id = %s
+    """, (current_user.id,))
+    total = cursor.fetchone()['total']
+    
+    return render_template('user_bookmarks.html',
+                         bookmarks=bookmarks,
+                         page=page,
+                         per_page=per_page,
+                         total=total,
+                         total_pages=(total + per_page - 1) // per_page)
+
+# Viewing history routes
+@app.route('/history')
+@login_required
+def view_history():
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    
+    # Get view history with pagination
+    cursor.execute("""
+        SELECT pt.*, uv.viewed_at, uv.id as history_id
+        FROM published_theses pt
+        JOIN user_view_history uv ON pt.id = uv.thesis_id
+        WHERE uv.user_id = %s
+        ORDER BY uv.viewed_at DESC
+        LIMIT %s OFFSET %s
+    """, (current_user.id, per_page, (page-1)*per_page))
+    history = cursor.fetchall()
+    
+    # Get total count
+    cursor.execute("""
+        SELECT COUNT(*) as total 
+        FROM user_view_history 
+        WHERE user_id = %s
+    """, (current_user.id,))
+    total = cursor.fetchone()['total']
+    
+    return render_template('user_history.html',
+                         history=history,
+                         page=page,
+                         per_page=per_page,
+                         total=total,
+                         total_pages=(total + per_page - 1) // per_page)
+@app.route('/delete-history-item/<int:item_id>', methods=['POST'])
+@login_required
+def delete_history_item(item_id):
+    cursor = mysql.connection.cursor()
+    
+    try:
+        # Verify the history item belongs to the current user before deleting
+        cursor.execute("""
+            DELETE FROM user_view_history 
+            WHERE id = (
+                SELECT id FROM (
+                    SELECT uv.id 
+                    FROM user_view_history uv
+                    JOIN published_theses pt ON uv.thesis_id = pt.id
+                    WHERE uv.user_id = %s AND pt.id = %s
+                    LIMIT 1
+                ) AS temp
+            )
+        """, (current_user.id, item_id))
+        
+        affected_rows = cursor.rowcount
+        mysql.connection.commit()
+        
+        if affected_rows == 0:
+            return jsonify({'success': False, 'error': 'Item not found or not authorized'})
+            
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        mysql.connection.rollback()
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        cursor.close()
+        
+@app.route('/clear-history', methods=['POST'])
+@login_required
+def clear_history():
+    cursor = mysql.connection.cursor()
+    
+    try:
+        cursor.execute("""
+            DELETE FROM user_view_history 
+            WHERE user_id = %s
+        """, (current_user.id,))
+        mysql.connection.commit()
+        flash('Viewing history cleared successfully', 'success')
+    except Exception as e:
+        mysql.connection.rollback()
+        flash('Error clearing history', 'danger')
+    finally:
+        cursor.close()
+        
+    return redirect(url_for('view_history'))
 
 @app.route('/logout')
 @login_required

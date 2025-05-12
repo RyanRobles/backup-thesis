@@ -453,3 +453,12 @@ main {
         margin-left: 0 !important;
     }
 }
+/* static/css/styles.css */
+.profile-settings-form {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.profile-settings-form .form-group {
+    margin-bottom: 1.5rem;
+}

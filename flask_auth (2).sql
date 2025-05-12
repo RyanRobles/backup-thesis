@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 10, 2025 at 07:47 PM
+-- Generation Time: May 12, 2025 at 08:04 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -613,9 +613,62 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `username`, `password`, `role`, `email`, `is_verified`, `verification_code`, `code_expires`) VALUES
-(8, 'admin', 'scrypt:32768:8:1$HD13SiK3xNEOgB4Q$8f9cef7b04f8979711202ec3baea8502975507eaaf11802866887837f1e76da75ad024a16e185349c66343fd922b3a7103322dd59a813c3933c583d5d7e176b7', 'admin', '', 0, NULL, NULL),
+(8, 'admin2025', 'scrypt:32768:8:1$ioJg56s33nLFUA2N$61c3ce9bbc863b712bc2ee697685f9dcdbb63688c4aedfc43a2a501fe0174c74bd77d59c8f78f740a0a69598889a2e399650481f3a403fe6b24118efaa91765f', 'admin', '', 1, NULL, NULL),
 (9, 'test123', 'scrypt:32768:8:1$HfY8VnN3kECdDeHZ$0a36ecbcfbcae5f10e6bf604f4b3983cf5a73e0662a381ea8b5e23805f13ca693f59d4ced55dc62309338a4898e44576d90b353ff1773c579dece79595a9d827', 'user', '', 0, NULL, NULL),
 (16, 'user123', 'scrypt:32768:8:1$44Ess0otkqMzEzp7$fed652a159519c43e61cb72cd03cdf2219554e7dd4065ac3caa9227e8d543335a322e842a3e19f5fbc1d4f0605dbe2b7931bb266e6afa39554c7900c2c589a24', 'user', 'ryanchristian.robles@cvsu.edu.ph', 1, NULL, NULL);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `user_bookmarks`
+--
+
+CREATE TABLE `user_bookmarks` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `thesis_id` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `user_bookmarks`
+--
+
+INSERT INTO `user_bookmarks` (`id`, `user_id`, `thesis_id`, `created_at`) VALUES
+(1, 16, 52, '2025-05-12 17:37:36'),
+(2, 16, 51, '2025-05-12 17:37:42');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `user_view_history`
+--
+
+CREATE TABLE `user_view_history` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `thesis_id` int(11) NOT NULL,
+  `viewed_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `user_view_history`
+--
+
+INSERT INTO `user_view_history` (`id`, `user_id`, `thesis_id`, `viewed_at`) VALUES
+(1, 16, 52, '2025-05-12 17:37:34'),
+(2, 16, 52, '2025-05-12 17:37:38'),
+(3, 16, 51, '2025-05-12 17:37:40'),
+(4, 16, 52, '2025-05-12 17:38:21'),
+(5, 16, 51, '2025-05-12 17:42:05'),
+(6, 16, 51, '2025-05-12 17:47:40'),
+(7, 16, 52, '2025-05-12 17:47:42'),
+(8, 16, 51, '2025-05-12 17:47:45'),
+(9, 16, 51, '2025-05-12 17:47:51'),
+(10, 16, 52, '2025-05-12 17:48:07'),
+(11, 16, 52, '2025-05-12 17:48:18'),
+(12, 16, 51, '2025-05-12 17:48:54'),
+(13, 16, 51, '2025-05-12 17:50:00');
 
 --
 -- Indexes for dumped tables
@@ -666,6 +719,22 @@ ALTER TABLE `users`
   ADD UNIQUE KEY `username` (`username`);
 
 --
+-- Indexes for table `user_bookmarks`
+--
+ALTER TABLE `user_bookmarks`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `unique_bookmark` (`user_id`,`thesis_id`),
+  ADD KEY `thesis_id` (`thesis_id`);
+
+--
+-- Indexes for table `user_view_history`
+--
+ALTER TABLE `user_view_history`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `user_id` (`user_id`),
+  ADD KEY `thesis_id` (`thesis_id`);
+
+--
 -- AUTO_INCREMENT for dumped tables
 --
 
@@ -706,6 +775,18 @@ ALTER TABLE `users`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
 
 --
+-- AUTO_INCREMENT for table `user_bookmarks`
+--
+ALTER TABLE `user_bookmarks`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
+-- AUTO_INCREMENT for table `user_view_history`
+--
+ALTER TABLE `user_view_history`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
+
+--
 -- Constraints for dumped tables
 --
 
@@ -740,6 +821,20 @@ ALTER TABLE `thesis_submissions`
 --
 ALTER TABLE `thesis_versions`
   ADD CONSTRAINT `thesis_versions_ibfk_2` FOREIGN KEY (`edited_by`) REFERENCES `users` (`id`);
+
+--
+-- Constraints for table `user_bookmarks`
+--
+ALTER TABLE `user_bookmarks`
+  ADD CONSTRAINT `user_bookmarks_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `user_bookmarks_ibfk_2` FOREIGN KEY (`thesis_id`) REFERENCES `published_theses` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `user_view_history`
+--
+ALTER TABLE `user_view_history`
+  ADD CONSTRAINT `user_view_history_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `user_view_history_ibfk_2` FOREIGN KEY (`thesis_id`) REFERENCES `published_theses` (`id`) ON DELETE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
