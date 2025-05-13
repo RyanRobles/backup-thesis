@@ -315,49 +315,93 @@ def user_dashboard():
 @app.route('/browse-theses')
 @login_required
 def browse_theses():
-    # Redirect admin users to admin version
     if current_user.is_admin():
         return redirect(url_for('admin_browse_theses'))
     
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     search_query = request.args.get('q', '')
+    year_filter = request.args.get('year', '')
+    keyword_filter = request.args.get('keyword', '')
+    sort_by = request.args.get('sort', 'recent')  # recent, oldest, title
     page = request.args.get('page', 1, type=int)
     per_page = 10
+    
+    # Common CS keywords for filter
+    common_cs_keywords = [
+        'artificial intelligence', 'machine learning', 'data science',
+        'cybersecurity', 'networking', 'database', 'algorithm',
+        'software engineering', 'web development', 'mobile development',
+        'cloud computing', 'blockchain', 'iot', 'computer vision',
+        'natural language processing', 'big data', 'data mining'
+    ]
     
     query = """
         SELECT pt.* 
         FROM published_theses pt
         WHERE 1=1
     """
+    params = []
     
     if search_query:
         query += """
             AND (pt.title LIKE %s OR pt.authors LIKE %s OR pt.keywords LIKE %s)
         """
-        params = (f'%{search_query}%', f'%{search_query}%', f'%{search_query}%')
-    else:
-        params = ()
+        params.extend([f'%{search_query}%', f'%{search_query}%', f'%{search_query}%'])
     
-    query += " ORDER BY pt.published_at DESC LIMIT %s OFFSET %s"
-    params += (per_page, (page-1)*per_page)
+    if year_filter:
+        query += " AND pt.year_made = %s"
+        params.append(year_filter)
+    
+    if keyword_filter:
+        query += " AND pt.keywords LIKE %s"
+        params.append(f'%{keyword_filter}%')
+    
+    # Sorting
+    if sort_by == 'recent':
+        query += " ORDER BY pt.published_at DESC"
+    elif sort_by == 'oldest':
+        query += " ORDER BY pt.published_at ASC"
+    elif sort_by == 'title':
+        query += " ORDER BY pt.title ASC"
+    
+    # Add pagination
+    query += " LIMIT %s OFFSET %s"
+    params.extend([per_page, (page-1)*per_page])
     
     cursor.execute(query, params)
     theses = cursor.fetchall()
     
     # Get total count
     count_query = "SELECT COUNT(*) as total FROM published_theses WHERE 1=1"
+    count_params = []
+    
     if search_query:
         count_query += " AND (title LIKE %s OR authors LIKE %s OR keywords LIKE %s)"
-        count_params = (f'%{search_query}%', f'%{search_query}%', f'%{search_query}%')
-    else:
-        count_params = ()
+        count_params.extend([f'%{search_query}%', f'%{search_query}%', f'%{search_query}%'])
+    
+    if year_filter:
+        count_query += " AND year_made = %s"
+        count_params.append(year_filter)
+    
+    if keyword_filter:
+        count_query += " AND keywords LIKE %s"
+        count_params.append(f'%{keyword_filter}%')
     
     cursor.execute(count_query, count_params)
     total = cursor.fetchone()['total']
     
+    # Get available years for filter
+    cursor.execute("SELECT DISTINCT year_made FROM published_theses ORDER BY year_made DESC")
+    available_years = [str(row['year_made']) for row in cursor.fetchall()]
+    
     return render_template('user_browse_theses.html', 
                          theses=theses, 
                          search_query=search_query,
+                         year_filter=year_filter,
+                         keyword_filter=keyword_filter,
+                         sort_by=sort_by,
+                         common_cs_keywords=common_cs_keywords,
+                         available_years=available_years,
                          page=page,
                          per_page=per_page,
                          total=total,
